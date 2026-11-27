@@ -1,5 +1,4 @@
 out/
-out2/
 work/
 *.tar.gz
 __pycache__/

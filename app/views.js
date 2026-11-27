@@ -1,299 +1,309 @@
-// HomeLedger views — one function per page, plain HTML strings.
-import { HISTORY } from './data.js';
-import { bars, donut, esc, legend } from './charts.js';
+// HomeLedger v2 — the six pages. Every view is a function of the state:
+// the same numbers appear on the dashboard, the budgets page and the
+// reports page because they are all computed in store.js from one seed.
+// User text is escaped before it is rendered.
+
+import { HOUSEHOLD, CATEGORIES } from './data.js';
 import {
-  addToGoal,
-  billsDue,
-  budgetRows,
-  categoryOf,
-  formatDate,
-  money,
-  money0,
-  totalIncome,
-  totalSpent,
+  money, money0, pct, formatDate, formatTargetDate, esc, categoryOf,
+  totalIncome, totalSpent, totalSaved, spentByCategory, budgetRows,
+  overBudgetCount, billsDue, unpaidTotal, billStatus, dueNextWeek,
+  goalRows, historyWithSaved, dailySpending, daysElapsed, monthDays,
+  paceFraction, avgDailySpent, projectedMonthEnd, plannedSpending,
 } from './store.js';
-
-// The books cover November 2026; "today" for bill badges is the 26th,
-// the last day the household has entered so far.
-const TODAY = '2026-11-26';
-
-export const txFilter = { category: 'all', search: '' };
+import { donut, legend, bars, dayBars } from './charts.js';
 
 function statCard(label, value, sub) {
-  return `<div class="stat"><p class="stat-label">${label}</p><p class="stat-value">${value}</p><p class="stat-sub">${sub}</p></div>`;
+  return `<div class="stat"><span class="stat-label">${label}</span><strong class="stat-value">${value}</strong><span class="stat-sub">${sub}</span></div>`;
 }
 
-function billBadge(bill) {
-  if (bill.paid) return '<span class="badge paid">Paid</span>';
-  if (bill.due < TODAY) return '<span class="badge overdue">Overdue</span>';
-  return '<span class="badge soon">Due soon</span>';
+function txRow(t, withActions) {
+  const c = categoryOf(t.category);
+  const note = t.note ? ` <span class="tx-note">${esc(t.note)}</span>` : '';
+  const actions = withActions
+    ? `<td class="tx-actions"><button type="button" class="btn btn-small" data-edit-tx="${t.id}">Edit</button> <button type="button" class="btn btn-small btn-danger" data-delete-tx="${t.id}">Delete</button></td>`
+    : '';
+  return `<tr><td>${formatDate(t.day)}</td><td>${esc(t.label)}${note}</td><td><span class="cat-dot" style="background:${c.color}"></span>${c.label}</td><td class="num">${money(t.amount)}</td>${actions}</tr>`;
 }
 
 export function viewDashboard(state) {
   const income = totalIncome();
   const spent = totalSpent(state);
-  const saved = income - spent;
+  const saved = totalSaved(state);
+  const plan = plannedSpending(state);
+  const proj = projectedMonthEnd(state);
   const rows = budgetRows(state).filter((r) => !r.isSavings);
-  const over = rows.filter((r) => r.spent > r.planned);
-  const due = state.bills.filter((b) => !b.paid);
-  const latest = [...state.transactions].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-8).reverse();
-  const topGoals = [...state.goals].sort((a, b) => b.saved / b.target - a.saved / a.target).slice(0, 2);
-  const pct = Math.round((saved / income) * 100);
+  const over = rows.filter((r) => r.over);
+  const due = billsDue(state);
+  const goals = goalRows(state).sort((a, b) => b.progress - a.progress).slice(0, 2);
+  const latest = [...state.transactions].sort((a, b) => b.day - a.day || b.id - a.id).slice(0, 8);
+  const pace = Math.round(paceFraction() * 100);
 
   return `
-  <section class="page-head">
-    <h1>November at a glance</h1>
-    <p class="lede">The Alvarez household took in ${money(income)}, spent ${money(spent)} and kept ${money(saved)} — ${pct}% of everything that came in.</p>
-  </section>
+  <h1>November at a glance</h1>
+  <p class="lede">${esc(HOUSEHOLD.name)} — ${esc(HOUSEHOLD.members)}. ${daysElapsed()} of ${monthDays()} days gone; every figure below is live, computed from the household's own transactions.</p>
   <section class="stats">
-    ${statCard('Income', money(income), '3 paydays in November')}
-    ${statCard('Spent', money(spent), `${state.transactions.length} transactions`)}
-    ${statCard('Saved', money(saved), `${pct}% of income — plan was ${money(1900)}`)}
-    ${statCard('Bills still due', money(billsDue(state)), `${due.length} unpaid bills`)}
+    ${statCard('Income', money(income), '3 payments in November')}
+    ${statCard('Spent', money(spent), money(plan) + ' planned')}
+    ${statCard('Saved', money(saved), pct(saved / income) + ' of income')}
+    ${statCard('Left to spend', money(Math.max(0, plan - spent)), spent > plan ? money(spent - plan) + ' over plan' : 'within plan')}
   </section>
-  <section class="grid-2">
-    <div class="card">
+  <section class="card pace-strip">
+    <h2>Month pace</h2>
+    <p><strong>${daysElapsed()} of ${monthDays()} days gone (${pace}%).</strong> Spending is running at ${money(avgDailySpent(state))} a day, which puts the month on course for <strong>${money(proj)}</strong> — ${money(Math.max(0, proj - plan))} over the ${money(plan)} plan if nothing changes. Four days are left to pull it back.</p>
+    <div class="bar"><span style="width:${pace}%; background:#1d4d3b"></span></div>
+    <p class="muted">${pace}% of the month elapsed</p>
+  </section>
+  <div class="grid-2">
+    <section class="card">
       <h2>Where the money went</h2>
-      ${donut(rows)}
+      ${donut(rows, 220)}
       ${legend(rows)}
-    </div>
-    <div class="card">
-      <h2>Budget watch</h2>
-      <p class="card-note">${over.length} of ${rows.length} categories are over their November plan.</p>
-      <ul class="watch">${over
-        .map(
-          (r) =>
-            `<li><span><span class="swatch" style="background:${r.color}"></span>${esc(r.label)} — ${money(r.spent)} of ${money(r.planned)}</span><strong class="over">+${money(r.spent - r.planned)}</strong></li>`,
-        )
-        .join('')}</ul>
-      <h2>Latest spending</h2>
-      <ul class="latest">${latest
-        .map(
-          (t) =>
-            `<li><span>${formatDate(t.date)} — ${esc(t.label)}</span><strong>${money(t.amount)}</strong></li>`,
-        )
-        .join('')}</ul>
-      <p><a class="link" href="#/transactions">See all ${state.transactions.length} transactions →</a></p>
-    </div>
-  </section>
-  <section class="grid-2">
-    <div class="card">
-      <h2>Bills to pay</h2>
-      ${due.length === 0 ? '<p class="card-note">All caught up — nothing due.</p>' : `<ul class="bills">${due
-        .map(
-          (b) =>
-            `<li><span>${esc(b.label)} <small>due ${formatDate(b.due)}</small></span><span>${billBadge(b)} <strong>${money(b.amount)}</strong></span></li>`,
-        )
-        .join('')}</ul>`}
-      <p><a class="link" href="#/bills">Manage all bills →</a></p>
-    </div>
-    <div class="card">
-      <h2>Goals, closest first</h2>
-      <ul class="goals-mini">${topGoals
-        .map(
-          (g) =>
-            `<li><span>${esc(g.name)}</span><strong>${Math.round((g.saved / g.target) * 100)}%</strong><div class="bar"><span style="width:${Math.min(100, (g.saved / g.target) * 100).toFixed(1)}%"></span></div><small>${money(g.saved)} of ${money(g.target)}</small></li>`,
-        )
-        .join('')}</ul>
-      <p><a class="link" href="#/goals">All savings goals →</a></p>
-    </div>
-  </section>`;
+    </section>
+    <section class="card">
+      <h2>Budget watch — ${over.length} categories over</h2>
+      <ul class="watch">
+        ${over.map((r) => `<li><span class="cat-dot" style="background:${r.color}"></span>${r.label}: spent ${money(r.spent)} of ${money(r.plan)} — <strong class="over-text">${money(r.overBy)} over</strong></li>`).join('')}
+      </ul>
+      <p class="muted">${(() => { const hot = [...rows].sort((a, b) => (b.spent / b.plan) - (a.spent / a.plan))[0]; return `${hot.label} ran hottest (${money(hot.spent)} of ${money(hot.plan)}, ${Math.round((hot.spent / hot.plan) * 100)}%): the heating top-up during the cold snap did most of it.`; })()}</p>
+      <h2>Latest transactions</h2>
+      <table class="tx"><tbody>${latest.map((t) => txRow(t, false)).join('')}</tbody></table>
+      <p><a href="#/transactions">See all ${state.transactions.length} transactions →</a></p>
+    </section>
+  </div>
+  <div class="grid-2">
+    <section class="card">
+      <h2>Bills still to pay — ${money(unpaidTotal(state))}</h2>
+      ${due.length
+        ? `<ul class="bills-mini">${due.map((b) => `<li>${esc(b.label)} — <strong>${money(b.amount)}</strong> <span class="badge ${billStatus(b).kind === 'overdue' ? 'badge-overdue' : 'badge-soon'}">${billStatus(b).text}</span></li>`).join('')}</ul>`
+        : '<p>All bills paid. Nothing outstanding.</p>'}
+      <p><a href="#/bills">Manage bills →</a></p>
+    </section>
+    <section class="card">
+      <h2>Closest goals</h2>
+      ${goals.map((g) => `<div class="goal-mini"><div class="goal-head"><span>${esc(g.label)}</span><strong>${money(g.current)} of ${money(g.target)}</strong></div><div class="bar"><span style="width:${Math.min(100, g.progress * 100)}%"></span></div><p class="muted">${money(g.monthlyNeeded)} a month still needed · on track at your usual pace</p></div>`).join('')}
+      <p><a href="#/goals">All savings goals →</a></p>
+    </section>
+  </div>`;
 }
 
-export function viewTransactions(state) {
-  const q = txFilter.search.trim().toLowerCase();
-  const rows = state.transactions.filter((t) => {
-    if (txFilter.category !== 'all' && t.category !== txFilter.category) return false;
-    if (q && !t.label.toLowerCase().includes(q) && !categoryOf(t.category).label.toLowerCase().includes(q)) return false;
-    return true;
-  });
-  const total = rows.reduce((sum, t) => sum + t.amount, 0);
+function txForm(ui) {
+  const t = ui.editingTx;
+  const title = t ? 'Edit transaction' : 'Add a transaction';
+  const day = t ? t.day : '';
+  const label = t ? esc(t.label) : '';
+  const note = t ? esc(t.note || '') : '';
+  const category = t ? t.category : 'groceries';
+  const amount = t ? t.amount.toFixed(2) : '';
+  const options = CATEGORIES.map((c) => `<option value="${c.id}"${c.id === category ? ' selected' : ''}>${c.label}</option>`).join('');
   return `
-  <section class="page-head">
-    <h1>Transactions</h1>
-    <p class="lede">Every dollar the household spent in November — ${rows.length} shown, ${money(total)} in total.</p>
-  </section>
-  <section class="card">
-    <form id="tx-filter" class="filter-row">
-      <label>Category
-        <select name="category" id="filter-category">
-          <option value="all">All categories</option>
-          ${state.budgets
-            .filter((b) => b.category !== 'savings')
-            .map((b) => `<option value="${b.category}" ${txFilter.category === b.category ? 'selected' : ''}>${esc(categoryOf(b.category).label)}</option>`)
-            .join('')}
-        </select>
-      </label>
-      <label>Search
-        <input type="search" name="search" id="filter-search" placeholder="e.g. GreenMart" value="${esc(txFilter.search)}">
-      </label>
-    </form>
-    <table class="tx-wide">
-      <thead><tr><th>Date</th><th>What</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead>
-      <tbody>${rows
-        .map(
-          (t) => `<tr>
-            <td>${formatDate(t.date)}</td>
-            <td>${esc(t.label)}</td>
-            <td><span class="swatch" style="background:${categoryOf(t.category).color}"></span>${esc(categoryOf(t.category).label)}</td>
-            <td class="num">${money(t.amount)}</td>
-            <td><button type="button" class="btn small danger" data-delete-tx="${t.id}">Delete</button></td>
-          </tr>`,
-        )
-        .join('') || '<tr><td colspan="5">Nothing matches — try another search.</td></tr>'}
-      </tbody>
-    </table>
-  </section>
-  <section class="card">
-    <h2>Add a transaction</h2>
-    <form id="add-tx" class="form-grid">
-      <label>Date <input type="date" name="date" value="2026-11-26" required></label>
-      <label>What <input type="text" name="label" placeholder="e.g. GreenMart weekly shop" required maxlength="80"></label>
-      <label>Category
-        <select name="category">${state.budgets
-          .filter((b) => b.category !== 'savings')
-          .map((b) => `<option value="${b.category}">${esc(categoryOf(b.category).label)}</option>`)
-          .join('')}</select>
-      </label>
-      <label>Amount ($) <input type="number" name="amount" min="0.01" step="0.01" placeholder="0.00" required></label>
-      <button type="submit" class="btn">Add transaction</button>
-    </form>
-  </section>`;
+  <form id="tx-form" class="form-card" data-editing="${t ? t.id : ''}">
+    <h2>${title}</h2>
+    <div class="form-row">
+      <label>Day of November <input type="number" name="day" min="1" max="30" required value="${day}" placeholder="26"></label>
+      <label>Amount ($) <input type="number" name="amount" min="0.01" step="0.01" required value="${amount}" placeholder="25.00"></label>
+    </div>
+    <label>Description <input type="text" name="label" required maxlength="80" value="${label}" placeholder="GreenMart weekly shop"></label>
+    <label>Note (optional) <input type="text" name="note" maxlength="80" value="${note}" placeholder="Who or what it was for"></label>
+    <label>Category <select name="category">${options}</select></label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">${t ? 'Save changes' : 'Add transaction'}</button>
+      ${t ? '<button type="button" class="btn" data-cancel-edit>Cancel</button>' : ''}
+    </div>
+  </form>`;
+}
+
+export function viewTransactions(state, ui) {
+  const q = (ui.txSearch || '').toLowerCase();
+  const cat = ui.txCategory || 'all';
+  const sort = ui.txSort || 'date-desc';
+  let list = state.transactions.filter((t) => {
+    const hay = (t.label + ' ' + (t.note || '') + ' ' + categoryOf(t.category).label).toLowerCase();
+    return (cat === 'all' || t.category === cat) && (!q || hay.includes(q));
+  });
+  const sorts = {
+    'date-desc': (a, b) => b.day - a.day || b.id - a.id,
+    'date-asc': (a, b) => a.day - b.day || a.id - b.id,
+    'amount-desc': (a, b) => b.amount - a.amount,
+    'amount-asc': (a, b) => a.amount - b.amount,
+  };
+  list = list.sort(sorts[sort] || sorts['date-desc']);
+  const shownTotal = list.reduce((s, t) => s + t.amount, 0);
+  const catOptions = ['<option value="all">All categories</option>'].concat(
+    CATEGORIES.map((c) => `<option value="${c.id}"${c.id === cat ? ' selected' : ''}>${c.label}</option>`),
+  ).join('');
+
+  return `
+  <h1>Transactions</h1>
+  <p class="lede">${state.transactions.length} expenses in November, ${money(totalSpent(state))} in total. Search, filter and sort them; add, edit or delete any row and every total on the site updates.</p>
+  <div class="toolbar">
+    <input type="search" id="tx-search" placeholder="Search transactions…" value="${esc(ui.txSearch || '')}" aria-label="Search transactions">
+    <select id="tx-category" aria-label="Filter by category">${catOptions}</select>
+    <select id="tx-sort" aria-label="Sort transactions">
+      <option value="date-desc"${sort === 'date-desc' ? ' selected' : ''}>Newest first</option>
+      <option value="date-asc"${sort === 'date-asc' ? ' selected' : ''}>Oldest first</option>
+      <option value="amount-desc"${sort === 'amount-desc' ? ' selected' : ''}>Amount: high to low</option>
+      <option value="amount-asc"${sort === 'amount-asc' ? ' selected' : ''}>Amount: low to high</option>
+    </select>
+    <button type="button" class="btn" data-csv>Download CSV</button>
+  </div>
+  <p class="muted">Showing ${list.length} of ${state.transactions.length} transactions — ${money(shownTotal)}.</p>
+  <table class="tx tx-wide">
+    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="num">Amount</th><th>Actions</th></tr></thead>
+    <tbody>${list.map((t) => txRow(t, true)).join('') || '<tr><td colspan="5">No transactions match. Try clearing the search or filter.</td></tr>'}</tbody>
+  </table>
+  ${txForm(ui)}`;
 }
 
 export function viewBudgets(state) {
   const rows = budgetRows(state);
-  const plannedSpend = rows.filter((r) => !r.isSavings).reduce((s, r) => s + r.planned, 0);
-  const actualSpend = totalSpent(state);
+  const pace = Math.round(paceFraction() * 100);
+  const cards = rows.map((r) => {
+    const width = Math.min(100, (r.spent / r.plan) * 100);
+    const status = r.isSavings
+      ? (r.spent >= r.plan
+          ? `<strong class="under-text">${money(r.spent - r.plan)} above the savings plan</strong>`
+          : `<strong>${money(r.plan - r.spent)} short of the savings plan</strong>`)
+      : r.over
+        ? `<strong class="over-text">${money(r.overBy)} over budget</strong>`
+        : `<strong class="under-text">${money(r.left)} left</strong>`;
+    const paceLine = r.isSavings
+      ? `Saving at ${money(r.spent)} of ${money(r.plan)} planned — on course to beat the plan.`
+      : r.fixed
+        ? 'Fixed monthly cost — rent, paid in full on Nov 1.'
+        : r.aheadOfPace
+          ? `Pace check: ${money(r.expectedByNow)} expected by today (${pace}% of the month) — <strong class="over-text">ahead of pace by ${money(r.paceGap)}</strong>.`
+          : `Pace check: ${money(r.expectedByNow)} expected by today (${pace}% of the month) — <strong class="under-text">under pace by ${money(-r.paceGap)}</strong>.`;
+    return `<section class="card budget-card${r.isSavings ? ' savings-card' : ''}">
+      <div class="budget-head"><h2>${r.label}</h2><span>${money(r.spent)} of ${money(r.plan)}</span></div>
+      <div class="bar${r.over ? ' bar-over' : ''}"><span style="width:${width}%; background:${r.over ? '#b3261e' : r.color}"></span></div>
+      <p>${status} · ${Math.round((r.spent / r.plan) * 100)}% of plan</p>
+      <p class="muted">${paceLine}</p>
+      <form class="budget-form" data-budget="${r.id}">
+        <label>Monthly plan ($) <input type="number" name="amount" min="0" step="1" required value="${r.plan}"></label>
+        <button type="submit" class="btn btn-small">Update plan</button>
+      </form>
+    </section>`;
+  }).join('');
   return `
-  <section class="page-head">
-    <h1>Budgets</h1>
-    <p class="lede">The November plan was ${money(plannedSpend)} of spending. The household spent ${money(actualSpend)} — ${money(Math.abs(actualSpend - plannedSpend))} ${actualSpend > plannedSpend ? 'over' : 'under'} plan.</p>
-  </section>
-  <section class="budget-grid">${rows
-    .map((r) => {
-      const pct = r.planned > 0 ? (r.spent / r.planned) * 100 : 0;
-      const over = r.spent > r.planned;
-      return `<article class="card budget-card${r.isSavings ? ' savings' : ''}">
-        <h2><span class="swatch" style="background:${r.color}"></span>${esc(r.label)}</h2>
-        <p class="big">${money(r.spent)} <small>of ${money(r.planned)} planned</small></p>
-        <div class="bar${over ? ' over' : ''}"><span style="width:${Math.min(100, pct).toFixed(1)}%"></span></div>
-        <p class="budget-line">${over ? `<strong class="over">${money(r.spent - r.planned)} over plan</strong>` : `<strong class="under">${money(r.planned - r.spent)} left</strong>`} · ${pct.toFixed(0)}% used</p>
-        <form class="edit-budget" data-category="${r.category}">
-          <label>Monthly plan ($) <input type="number" name="planned" min="0" step="1" value="${r.planned}" required></label>
-          <button type="submit" class="btn small">Update plan</button>
-        </form>
-      </article>`;
-    })
-    .join('')}</section>`;
+  <h1>Budgets</h1>
+  <p class="lede">One plan per category for November. ${overBudgetCount(state)} of ${CATEGORIES.length} spending categories are over budget; the pace check under each card compares spending so far with ${pace}% of the month gone. Change any plan and the dashboard updates.</p>
+  <div class="grid-2">${cards}</div>`;
 }
 
 export function viewBills(state) {
-  const unpaid = state.bills.filter((b) => !b.paid).sort((a, b) => (a.due < b.due ? -1 : 1));
-  const paid = state.bills.filter((b) => b.paid).sort((a, b) => (a.due < b.due ? -1 : 1));
+  const due = billsDue(state).sort((a, b) => a.day - b.day);
+  const paid = state.bills.filter((b) => b.paid).sort((a, b) => a.day - b.day);
+  const week = dueNextWeek(state);
+  const weekTotal = week.reduce((s, b) => s + b.amount, 0);
   return `
-  <section class="page-head">
-    <h1>Bills</h1>
-    <p class="lede">${unpaid.length} bills still to pay, ${money(billsDue(state))} in total. Mark one paid and it moves to the paid list below.</p>
+  <h1>Bills</h1>
+  <p class="lede">Everything the household owes in November, with the countdown from today (Nov 26). Mark a bill paid and the dashboard's outstanding total drops at once.</p>
+  <section class="card">
+    <h2>Needs attention — ${due.length} unpaid, ${money(unpaidTotal(state))}</h2>
+    <p class="muted">Due in the next 7 days: <strong>${money(weekTotal)}</strong> (${week.length} bill${week.length === 1 ? '' : 's'}).</p>
+    ${due.length
+      ? `<ul class="bill-list">${due.map((b) => {
+          const st = billStatus(b);
+          return `<li><span>${esc(b.label)} — ${formatDate(b.day)}</span><span class="badge ${st.kind === 'overdue' ? 'badge-overdue' : 'badge-soon'}">${st.text}</span><strong>${money(b.amount)}</strong><button type="button" class="btn btn-small btn-primary" data-toggle-bill="${b.id}">Mark paid</button></li>`;
+        }).join('')}</ul>`
+      : '<p>All bills paid. Nothing outstanding.</p>'}
   </section>
   <section class="card">
-    <h2>Needs attention</h2>
-    ${unpaid.length === 0 ? '<p class="card-note">All caught up — nothing due.</p>' : `<ul class="bills">${unpaid
-      .map(
-        (b) =>
-          `<li><span>${esc(b.label)} <small>due ${formatDate(b.due)}</small></span><span>${billBadge(b)} <strong>${money(b.amount)}</strong> <button type="button" class="btn small" data-toggle-bill="${b.id}">Mark paid</button></span></li>`,
-      )
-      .join('')}</ul>`}
+    <h2>Paid — ${paid.length} bills</h2>
+    <ul class="bill-list">${paid.map((b) => `<li><span>${esc(b.label)} — ${formatDate(b.day)}</span><span class="badge badge-paid">Paid</span><strong>${money(b.amount)}</strong><button type="button" class="btn btn-small" data-toggle-bill="${b.id}">Undo</button></li>`).join('')}</ul>
   </section>
-  <section class="card">
-    <h2>Paid this month</h2>
-    <ul class="bills">${paid
-      .map(
-        (b) =>
-          `<li><span>${esc(b.label)} <small>due ${formatDate(b.due)}</small></span><span>${billBadge(b)} <strong>${money(b.amount)}</strong> <button type="button" class="btn small" data-toggle-bill="${b.id}">Undo</button></span></li>`,
-      )
-      .join('')}</ul>
-  </section>
-  <section class="card">
+  <form id="bill-form" class="form-card">
     <h2>Add a bill</h2>
-    <form id="add-bill" class="form-grid">
-      <label>What <input type="text" name="label" placeholder="e.g. Gym membership" required maxlength="80"></label>
-      <label>Amount ($) <input type="number" name="amount" min="0.01" step="0.01" placeholder="0.00" required></label>
-      <label>Due date <input type="date" name="due" value="2026-11-30" required></label>
-      <button type="submit" class="btn">Add bill</button>
-    </form>
-  </section>`;
+    <div class="form-row">
+      <label>Bill <input type="text" name="label" required maxlength="60" placeholder="Water — City Water"></label>
+      <label>Day of November <input type="number" name="day" min="1" max="30" required placeholder="12"></label>
+      <label>Amount ($) <input type="number" name="amount" min="0.01" step="0.01" required placeholder="42.10"></label>
+    </div>
+    <button type="submit" class="btn btn-primary">Add bill</button>
+  </form>`;
 }
 
 export function viewGoals(state) {
+  const goals = goalRows(state);
   return `
-  <section class="page-head">
-    <h1>Savings goals</h1>
-    <p class="lede">November's ${money(totalIncome() - totalSpent(state))} kept goes toward these four goals — ${money(state.goals.reduce((s, g) => s + g.saved, 0))} saved across them so far.</p>
-  </section>
-  <section class="budget-grid">${state.goals
-    .map((g) => {
-      const pct = (g.saved / g.target) * 100;
-      return `<article class="card goal-card">
-        <h2>${esc(g.name)}</h2>
-        <p class="card-note">${esc(g.note)}</p>
-        <p class="big">${money(g.saved)} <small>of ${money(g.target)}</small></p>
-        <div class="bar"><span style="width:${Math.min(100, pct).toFixed(1)}%"></span></div>
-        <p class="budget-line"><strong>${pct.toFixed(0)}% there</strong> · ${money(g.target - g.saved)} to go</p>
-        <form class="add-goal" data-goal="${g.id}">
-          <label>Add funds ($) <input type="number" name="amount" min="1" step="1" placeholder="50" required></label>
-          <button type="submit" class="btn small">Add to goal</button>
-        </form>
-      </article>`;
-    })
-    .join('')}</section>`;
+  <h1>Savings goals</h1>
+  <p class="lede">Four goals, each with a target date. The monthly figure is what the household still has to put aside every month from now on — judged against its usual pace of ${money0(goals[0].usualPace)} saved a month, the average of the last six months.</p>
+  <div class="grid-2">
+    ${goals.map((g) => `<section class="card goal-card">
+      <div class="goal-head"><h2>${esc(g.label)}</h2><span>${money(g.current)} of ${money(g.target)}</span></div>
+      <div class="bar"><span style="width:${Math.min(100, g.progress * 100)}%"></span></div>
+      <p>${pct(g.progress)} there · ${money(g.left)} to go · target ${formatTargetDate(g.targetDate)}</p>
+      <p>${money(g.monthlyNeeded)} a month for ${g.months} months · <strong class="${g.onTrack ? 'under-text' : 'over-text'}">${g.onTrack ? 'On track at your usual pace' : 'Needs more than your usual pace'}</strong></p>
+      <form class="goal-form" data-goal="${g.id}">
+        <label>Add funds ($) <input type="number" name="amount" min="0.01" step="0.01" required placeholder="100.00"></label>
+        <button type="submit" class="btn btn-small btn-primary">Add to goal</button>
+      </form>
+    </section>`).join('')}
+  </div>`;
 }
 
 export function viewReports(state) {
-  const spent = totalSpent(state);
-  const rows = budgetRows(state)
-    .filter((r) => !r.isSavings)
-    .sort((a, b) => b.spent - a.spent);
-  const over = rows.filter((r) => r.spent > r.planned);
-  const saved = totalIncome() - spent;
-  const savedOverPlan = saved - 1900;
-  const groceryShops = state.transactions.filter((t) => t.category === 'groceries' && /GreenMart|FreshFarm|Costco/.test(t.label));
-  const groceryAvg = groceryShops.reduce((s, t) => s + t.amount, 0) / groceryShops.length;
-  const avgSaved =
-    HISTORY.reduce((s, h) => s + (h.income - h.spent), 0) / HISTORY.length;
+  const history = historyWithSaved();
+  const spent = spentByCategory(state);
+  const rows = budgetRows(state).filter((r) => !r.isSavings);
+  const sorted = [...rows].sort((a, b) => b.spent - a.spent);
+  const days = dailySpending(state);
+  const proj = projectedMonthEnd(state);
+  const plan = plannedSpending(state);
+  const saved = totalSaved(state);
+  const savePlan = state.budgets.savings || 0;
+
+  const groceryTx = state.transactions.filter((t) => t.category === 'groceries');
+  const groceryAvg = groceryTx.reduce((s, t) => s + t.amount, 0) / Math.max(1, groceryTx.length);
+  const nonRent = [...state.transactions].filter((t) => t.category !== 'housing').sort((a, b) => b.amount - a.amount)[0];
+  const dayTotals = days.map((d) => ({ ...d }));
+  const priciestDay = [...dayTotals].sort((a, b) => b.amount - a.amount)[0];
+  const priciestNonRentDay = [...dayTotals].filter((d) => d.day !== 1).sort((a, b) => b.amount - a.amount)[0];
+
+  const heatingTx = state.transactions.find((t) => t.label.toLowerCase().includes('heating'));
+  const dinnerTx = state.transactions.find((t) => t.label.toLowerCase().includes('anniversary dinner'));
+  const overNote = heatingTx && dinnerTx
+    ? ` The heating top-up (${money(heatingTx.amount)}) and the anniversary dinner (${money(dinnerTx.amount)}) did most of the damage in the last week.`
+    : '';
+
+  const insights = [
+    `Biggest cost is Housing at ${money(spent.housing)} — rent is fixed and was paid in full on Nov 1.`,
+    `${overBudgetCount(state)} categories are over budget.${overNote}`,
+    `Saved ${money(saved)} so far — ${money(saved - savePlan)} more than the ${money(savePlan)} plan, and above plan every month since June.`,
+    `${groceryTx.length} grocery shops averaged ${money(groceryAvg)} each.`,
+    `At the current daily rate the month ends at ${money(proj)} spent — ${money(Math.max(0, proj - plan))} over the ${money(plan)} plan.`,
+    ...(nonRent ? [`Biggest single expense after rent: ${esc(nonRent.label)} at ${money(nonRent.amount)} on ${formatDate(nonRent.day)}.`] : []),
+    `An average day costs ${money(avgDailySpent(state))}. The priciest day was Nov 1 (${money(priciestDay.amount)}, rent day); after rent it was Nov ${priciestNonRentDay.day} at ${money(priciestNonRentDay.amount)}.`,
+  ];
+
   return `
-  <section class="page-head">
-    <h1>Reports</h1>
-    <p class="lede">Six months of the Alvarez household, June to November 2026 — income against spending, and what November taught them.</p>
+  <h1>Reports</h1>
+  <p class="lede">Six months of history, November day by day, and every category ranked. All of it recomputes from the transactions — edit one and come back here to see the change.</p>
+  <section class="card">
+    <h2>Income vs spending — Jun to Nov 2026</h2>
+    ${bars(history, 640, 260)}
+    <p class="muted"><span class="swatch" style="background:#1d4d3b"></span> Income &nbsp; <span class="swatch" style="background:#d97706"></span> Spending. Six-month average saved: ${money0(goalsAvgSaved())} a month.</p>
   </section>
   <section class="card">
-    <h2>Income vs spending</h2>
-    ${bars(HISTORY)}
-    <p class="legend-line"><span class="swatch" style="background:#1d4d3b"></span>Income <span class="swatch" style="background:#d97706"></span>Spending</p>
-    <p class="card-note">The household saved ${money0(avgSaved)} a month on average over the last six months.</p>
+    <h2>Daily spending — November so far</h2>
+    ${dayBars(days, 640, 220)}
+    <p class="muted">Red days cost $300 or more, amber $100 or more. Quiet days are the green ones — ${days.filter((d) => d.amount === 0).length} days with no spending at all.</p>
   </section>
   <section class="card">
-    <h2>November by category</h2>
-    <table>
-      <thead><tr><th>Category</th><th class="num">Planned</th><th class="num">Spent</th><th class="num">Difference</th></tr></thead>
-      <tbody>${rows
-        .map(
-          (r) =>
-            `<tr><td><span class="swatch" style="background:${r.color}"></span>${esc(r.label)}</td><td class="num">${money(r.planned)}</td><td class="num">${money(r.spent)}</td><td class="num ${r.spent > r.planned ? 'over-text' : 'under-text'}">${r.spent > r.planned ? '+' : '−'}${money(Math.abs(r.spent - r.planned))}</td></tr>`,
-        )
-        .join('')}</tbody>
+    <h2>Categories ranked by spending</h2>
+    <table class="tx">
+      <thead><tr><th>Category</th><th class="num">Spent</th><th class="num">Plan</th><th class="num">Over / under</th><th class="num">% of plan</th></tr></thead>
+      <tbody>${sorted.map((r) => `<tr><td><span class="cat-dot" style="background:${r.color}"></span>${r.label}</td><td class="num">${money(r.spent)}</td><td class="num">${money(r.plan)}</td><td class="num ${r.over ? 'over-text' : 'under-text'}">${r.over ? '+' : ''}${money(r.spent - r.plan)}</td><td class="num">${Math.round((r.spent / r.plan) * 100)}%</td></tr>`).join('')}</tbody>
     </table>
   </section>
   <section class="card">
-    <h2>What November taught us</h2>
-    <ul class="insights">
-      <li><strong>Biggest cost is housing.</strong> Rent alone is ${money(1850)} — 40% of everything the household spent.</li>
-      <li><strong>${over.length} categories ran over budget.</strong> The heating top-up (${money(64.2)}) and the anniversary dinner (${money(96.4)}) did most of it.</li>
-      <li><strong>Saved ${money(savedOverPlan)} more than the ${money(1900)} plan</strong> — the third month in a row above plan.</li>
-      <li><strong>Seven grocery shops averaged ${money(groceryAvg)} each.</strong> The Costco bulk run (${money(154.6)}) was the dearest; the mid-week top-ups were the cheapest.</li>
-    </ul>
+    <h2>What the numbers say</h2>
+    <ul class="insights">${insights.map((i) => `<li>${i}</li>`).join('')}</ul>
   </section>`;
 }
 
-// Re-exported for the router: adding funds is a store call the view needs.
-export { addToGoal };
+function goalsAvgSaved() {
+  const h = historyWithSaved();
+  return h.reduce((s, x) => s + x.saved, 0) / h.length;
+}
