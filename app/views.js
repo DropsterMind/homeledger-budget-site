@@ -1,4 +1,4 @@
-// HomeLedger v2 — the six pages. Every view is a function of the state:
+// HomeLedger v3 — the seven pages. Every view is a function of the state:
 // the same numbers appear on the dashboard, the budgets page and the
 // reports page because they are all computed in store.js from one seed.
 // User text is escaped before it is rendered.
@@ -10,11 +10,12 @@ import {
   overBudgetCount, billsDue, unpaidTotal, billStatus, dueNextWeek,
   goalRows, historyWithSaved, dailySpending, daysElapsed, monthDays,
   paceFraction, avgDailySpent, projectedMonthEnd, plannedSpending,
+  decemberSummary, monthlyRecurringTotal,
 } from './store.js';
 import { donut, legend, bars, dayBars } from './charts.js';
 
-function statCard(label, value, sub) {
-  return `<div class="stat"><span class="stat-label">${label}</span><strong class="stat-value">${value}</strong><span class="stat-sub">${sub}</span></div>`;
+function statCard(label, value, sub, valueId, subId) {
+  return `<div class="stat"><span class="stat-label">${label}</span><strong class="stat-value"${valueId ? ` id="${valueId}"` : ''}>${value}</strong><span class="stat-sub"${subId ? ` id="${subId}"` : ''}>${sub}</span></div>`;
 }
 
 function txRow(t, withActions) {
@@ -202,16 +203,17 @@ export function viewBills(state) {
   <section class="card">
     <h2>Needs attention — ${due.length} unpaid, ${money(unpaidTotal(state))}</h2>
     <p class="muted">Due in the next 7 days: <strong>${money(weekTotal)}</strong> (${week.length} bill${week.length === 1 ? '' : 's'}).</p>
+    <p class="muted">Recurring bills total <strong>${money(monthlyRecurringTotal(state))}</strong> a month — internet, phone, gym and streaming repeat unless cancelled.</p>
     ${due.length
       ? `<ul class="bill-list">${due.map((b) => {
           const st = billStatus(b);
-          return `<li><span>${esc(b.label)} — ${formatDate(b.day)}</span><span class="badge ${st.kind === 'overdue' ? 'badge-overdue' : 'badge-soon'}">${st.text}</span><strong>${money(b.amount)}</strong><button type="button" class="btn btn-small btn-primary" data-toggle-bill="${b.id}">Mark paid</button></li>`;
+          return `<li><span>${esc(b.label)} — ${formatDate(b.day)}</span>${b.recurring ? '<span class="badge badge-recurring">Recurring</span>' : ''}<span class="badge ${st.kind === 'overdue' ? 'badge-overdue' : 'badge-soon'}">${st.text}</span><strong>${money(b.amount)}</strong><button type="button" class="btn btn-small btn-primary" data-toggle-bill="${b.id}">Mark paid</button></li>`;
         }).join('')}</ul>`
       : '<p>All bills paid. Nothing outstanding.</p>'}
   </section>
   <section class="card">
     <h2>Paid — ${paid.length} bills</h2>
-    <ul class="bill-list">${paid.map((b) => `<li><span>${esc(b.label)} — ${formatDate(b.day)}</span><span class="badge badge-paid">Paid</span><strong>${money(b.amount)}</strong><button type="button" class="btn btn-small" data-toggle-bill="${b.id}">Undo</button></li>`).join('')}</ul>
+    <ul class="bill-list">${paid.map((b) => `<li><span>${esc(b.label)} — ${formatDate(b.day)}</span>${b.recurring ? '<span class="badge badge-recurring">Recurring</span>' : ''}<span class="badge badge-paid">Paid</span><strong>${money(b.amount)}</strong><button type="button" class="btn btn-small" data-toggle-bill="${b.id}">Undo</button></li>`).join('')}</ul>
   </section>
   <form id="bill-form" class="form-card">
     <h2>Add a bill</h2>
@@ -241,6 +243,40 @@ export function viewGoals(state) {
       </form>
     </section>`).join('')}
   </div>`;
+}
+
+export function planWarningHtml(summary) {
+  const overBy = summary.planned - summary.income;
+  return `<p><strong class="over-text">Over plan by ${money(overBy)}.</strong> The December plan spends more than the ${money(summary.income)} coming in, so the projected saving would be negative. Trim a category or two to get back under the income line.</p>`;
+}
+
+export function viewPlan(state) {
+  const summary = decemberSummary(state);
+  const novSaved = totalSaved(state);
+  const rows = CATEGORIES.map((c) => {
+    const novPlan = state.budgets[c.id] || 0;
+    const decPlan = state.december.plans[c.id] || 0;
+    return `<tr><td><span class="cat-dot" style="background:${c.color}"></span>${c.label}</td><td class="num">${money(novPlan)}</td><td><input type="number" class="plan-input" data-plan-category="${c.id}" min="0" step="1" value="${decPlan}" aria-label="December plan for ${c.label}"></td></tr>`;
+  }).join('');
+  return `
+  <h1>Plan December</h1>
+  <p class="lede">December starts from the November plan, with the same paydays — Maya's salary $3,900, Daniel's $2,750, and the $200 wiring job. Change any figure and the projected saving moves at once; the plan saves to your browser like the rest of the site.</p>
+  <section class="stats">
+    ${statCard('Expected income', money(summary.income), '3 payments in December')}
+    ${statCard('Planned spending', money(summary.planned), 'December plan so far', 'plan-planned')}
+    ${statCard('Projected savings', money(summary.projected), pct(summary.projected / summary.income) + ' of income', 'plan-projected', 'plan-projected-sub')}
+    ${statCard('November saved', money(novSaved), 'the plan to beat')}
+  </section>
+  <div id="plan-warning" class="card pace-strip"${summary.over ? '' : ' style="display:none"'}>${summary.over ? planWarningHtml(summary) : ''}</div>
+  <p><button type="button" class="btn" data-copy-november>Copy November plan</button> <span class="muted">Resets every December figure to the November plan.</span></p>
+  <section class="card">
+    <h2>December budget by category</h2>
+    <table class="tx plan-table">
+      <thead><tr><th>Category</th><th class="num">November plan</th><th class="num">December plan</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="muted">The November plan is shown for comparison; only the December column is editable. Savings is not a line here — it is whatever the plan leaves over.</p>
+  </section>`;
 }
 
 export function viewReports(state) {

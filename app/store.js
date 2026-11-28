@@ -1,10 +1,10 @@
-// HomeLedger v2 — state and arithmetic. The seed lives in data.js; this
+// HomeLedger v3 — state and arithmetic. The seed lives in data.js; this
 // module owns the editable copy (localStorage), every total the site
 // shows, and the v2 derived figures: month pace, month-end projection,
 // per-goal monthly need, and bill countdowns. All of it is pure
 // arithmetic on the seed — change a transaction and every page agrees.
 
-import { HOUSEHOLD, INCOME, CATEGORIES, BUDGETS, TRANSACTIONS, BILLS, GOALS, HISTORY } from './data.js';
+import { HOUSEHOLD, INCOME, DECEMBER_INCOME, CATEGORIES, BUDGETS, TRANSACTIONS, BILLS, GOALS, HISTORY } from './data.js';
 
 const KEY = 'homeledger-v2';
 
@@ -18,9 +18,18 @@ export function seedState() {
     budgets: clone(BUDGETS),
     bills: clone(BILLS),
     goals: clone(GOALS),
+    december: { plans: seedDecemberPlans() },
     nextTxId: 39,
     nextBillId: 11,
   };
+}
+
+// The December plan starts as a copy of the November spending plan
+// (savings is not a spending line — it is what the plan leaves over).
+export function seedDecemberPlans() {
+  const plans = {};
+  for (const c of CATEGORIES) plans[c.id] = BUDGETS[c.id] || 0;
+  return plans;
 }
 
 export function loadState() {
@@ -31,6 +40,9 @@ export function loadState() {
     if (!Array.isArray(s.transactions) || !s.budgets || !Array.isArray(s.bills) || !Array.isArray(s.goals)) {
       return seedState();
     }
+    // States saved before v3 have no December plan — seed one instead of
+    // dropping the household's November edits.
+    if (!s.december || !s.december.plans) s.december = { plans: seedDecemberPlans() };
     return s;
   } catch {
     return seedState();
@@ -201,6 +213,43 @@ export function billStatus(bill) {
 // Unpaid bills falling due in the next 7 days (today included).
 export function dueNextWeek(state) {
   return billsDue(state).filter((b) => daysToBill(b) >= 0 && daysToBill(b) <= 7);
+}
+
+// --- December plan (v3) -------------------------------------------------
+// December takes the same paydays as November. The plan is a per-category
+// spending budget for December; what is left over is the projected saving.
+
+export function decemberIncome() {
+  return DECEMBER_INCOME.reduce((s, i) => s + i.amount, 0);
+}
+
+export function decemberPlanned(state) {
+  return CATEGORIES.reduce((s, c) => s + (state.december.plans[c.id] || 0), 0);
+}
+
+export function decemberProjected(state) {
+  return decemberIncome() - decemberPlanned(state);
+}
+
+export function decemberSummary(state) {
+  const income = decemberIncome();
+  const planned = decemberPlanned(state);
+  const projected = income - planned;
+  return { income, planned, projected, over: planned > income };
+}
+
+export function setDecemberPlan(state, id, amount) {
+  if (state.december.plans[id] === undefined) return;
+  state.december.plans[id] = Math.round(amount * 100) / 100;
+}
+
+export function copyNovemberPlan(state) {
+  state.december.plans = seedDecemberPlans();
+}
+
+// Bills that repeat every month (internet, phone, gym, streaming).
+export function monthlyRecurringTotal(state) {
+  return state.bills.filter((b) => b.recurring).reduce((s, b) => s + b.amount, 0);
 }
 
 // --- goals (v2) -----------------------------------------------------------

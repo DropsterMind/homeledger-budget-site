@@ -1,4 +1,4 @@
-// HomeLedger v2 — seed data for the Alvarez household, November 2026.
+// HomeLedger v3 — seed data for the Alvarez household, November 2026.
 // A fictional family (Maya & Daniel, Sofia 9, Leo 6) keeping its monthly
 // budget. Every figure below is the seed the whole site computes from:
 // edit a transaction, a budget or a bill and every total on every page
@@ -16,6 +16,14 @@ export const HOUSEHOLD = {
 };
 
 export const INCOME = [
+  { label: "Maya's salary", day: 1, amount: 3900.0 },
+  { label: "Daniel's salary", day: 1, amount: 2750.0 },
+  { label: 'Daniel — weekend wiring job', day: 14, amount: 200.0 },
+];
+
+// December uses the same paydays as November: the plan page starts
+// from the same $6,850 coming in.
+export const DECEMBER_INCOME = [
   { label: "Maya's salary", day: 1, amount: 3900.0 },
   { label: "Daniel's salary", day: 1, amount: 2750.0 },
   { label: 'Daniel — weekend wiring job', day: 14, amount: 200.0 },
@@ -95,12 +103,12 @@ export const BILLS = [
   { id: 1, label: 'Rent', day: 1, amount: 1850.0, paid: true },
   { id: 2, label: 'School lunch plan', day: 2, amount: 45.0, paid: true },
   { id: 3, label: 'Electric — City Power', day: 5, amount: 96.4, paid: true },
-  { id: 4, label: 'Internet — Fibre 200 Mbps', day: 6, amount: 59.99, paid: true },
+  { id: 4, label: 'Internet — Fibre 200 Mbps', day: 6, amount: 59.99, paid: true, recurring: true },
   { id: 5, label: 'Car insurance', day: 6, amount: 132.0, paid: true },
   { id: 6, label: 'Water — City Water', day: 12, amount: 42.1, paid: true },
-  { id: 7, label: 'Streaming — films & series', day: 13, amount: 15.99, paid: true },
-  { id: 8, label: 'Phone plan — family', day: 18, amount: 85.0, paid: true },
-  { id: 9, label: 'Gym membership', day: 20, amount: 29.0, paid: false },
+  { id: 7, label: 'Streaming — films & series', day: 13, amount: 15.99, paid: true, recurring: true },
+  { id: 8, label: 'Phone plan — family', day: 18, amount: 85.0, paid: true, recurring: true },
+  { id: 9, label: 'Gym membership', day: 20, amount: 29.0, paid: false, recurring: true },
   { id: 10, label: 'Credit card', day: 27, amount: 412.0, paid: false },
 ];
 

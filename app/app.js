@@ -1,14 +1,15 @@
-// HomeLedger v2 — the shell: hash router plus one delegated listener for
+// HomeLedger v3 — the shell: hash router plus one delegated listener for
 // every control on the site. Each change saves the state and re-renders
 // the current page, so the numbers on every page always agree.
 
-import { loadState, saveState, resetState, addTransaction, updateTransaction, deleteTransaction, setBudget, toggleBill, addBill, addToGoal, transactionsCsv } from './store.js';
-import { viewDashboard, viewTransactions, viewBudgets, viewBills, viewGoals, viewReports } from './views.js';
+import { loadState, saveState, resetState, addTransaction, updateTransaction, deleteTransaction, setBudget, toggleBill, addBill, addToGoal, transactionsCsv, setDecemberPlan, copyNovemberPlan, decemberSummary, money, pct } from './store.js';
+import { viewDashboard, viewTransactions, viewBudgets, viewBills, viewGoals, viewReports, viewPlan, planWarningHtml } from './views.js';
 
 const ROUTES = [
   { hash: '#/', label: 'Dashboard', view: viewDashboard },
   { hash: '#/transactions', label: 'Transactions', view: viewTransactions },
   { hash: '#/budgets', label: 'Budgets', view: viewBudgets },
+  { hash: '#/plan', label: 'Plan December', view: viewPlan },
   { hash: '#/bills', label: 'Bills', view: viewBills },
   { hash: '#/goals', label: 'Goals', view: viewGoals },
   { hash: '#/reports', label: 'Reports', view: viewReports },
@@ -88,6 +89,11 @@ document.addEventListener('click', (e) => {
     rerender();
     return;
   }
+  if (t.closest('[data-copy-november]')) {
+    copyNovemberPlan(state);
+    rerender();
+    return;
+  }
   if (t.closest('[data-toggle-bill]')) {
     toggleBill(state, Number(t.closest('[data-toggle-bill]').dataset.toggleBill));
     rerender();
@@ -112,6 +118,33 @@ document.addEventListener('click', (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (!(t instanceof HTMLElement)) return;
+  if (t.classList && t.classList.contains('plan-input')) {
+    // Live December plan: save the figure and move the projected saving
+    // without re-rendering, so the input keeps focus while typing.
+    const v = parseFloat(t.value);
+    if (!Number.isNaN(v) && v >= 0) {
+      setDecemberPlan(state, t.dataset.planCategory, v);
+      saveState(state);
+      const summary = decemberSummary(state);
+      const planned = document.getElementById('plan-planned');
+      if (planned) planned.textContent = money(summary.planned);
+      const projected = document.getElementById('plan-projected');
+      if (projected) projected.textContent = money(summary.projected);
+      const sub = document.getElementById('plan-projected-sub');
+      if (sub) sub.textContent = pct(summary.projected / summary.income) + ' of income';
+      const warn = document.getElementById('plan-warning');
+      if (warn) {
+        if (summary.over) {
+          warn.innerHTML = planWarningHtml(summary);
+          warn.style.display = '';
+        } else {
+          warn.innerHTML = '';
+          warn.style.display = 'none';
+        }
+      }
+    }
+    return;
+  }
   if (t.id === 'tx-search') {
     ui.txSearch = t.value;
     // Re-rendering on every keystroke would drop focus, so only the table

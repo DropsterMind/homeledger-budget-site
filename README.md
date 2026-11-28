@@ -24,7 +24,8 @@ page recomputes.
 - **Dashboard** — income, spent, saved and left-to-spend cards; a month-pace strip (26 of 30 days gone, spending projected to $5,331.07 by month-end); spending donut with legend; budget watch; latest transactions; unpaid bills; closest goals.
 - **Transactions** — search, filter by category, sort by date or amount; add, edit and delete transactions; download the month as CSV. All totals update live.
 - **Budgets** — one card per category with a progress bar, over/under line and a pace check (spending so far vs the share of the month gone); plans are editable inline, including the savings plan.
-- **Bills** — countdowns from today ("overdue by 6 days", "due tomorrow"), mark paid / undo, add-a-bill form, and the total due in the next 7 days.
+- **Bills** — countdowns from today ("overdue by 6 days", "due tomorrow"), mark paid / undo, add-a-bill form, and the total due in the next 7 days. Recurring bills (internet, phone, gym, streaming) carry a Recurring tag, with a monthly recurring total of $189.98.
+- **Plan December** — a forward-looking page: per-category December budget inputs starting from the November plan, live projected savings against the same $6,850 of December income, a "Copy November plan" button, and an over-plan warning when the plan spends more than the income.
 - **Goals** — each goal shows its target date, the monthly amount still needed, and whether the household's usual saving pace ($2,305 a month) covers it; add funds to any goal.
 - **Reports** — income vs spending for Jun–Nov 2026, daily spending bars for November, categories ranked by spending, and insights computed from the data (biggest costs, pace, projected month-end).
 
@@ -47,6 +48,18 @@ sorting and CSV export, a pace check on every budget, goal tracking
 against target dates and the household's usual saving pace, daily
 spending bars and a month-end projection on Reports, and bill countdowns.
 Nothing is a placeholder — every button on every page works.
+
+## v3 — what changed
+
+v2 climbed to 514 of 5,723 in blind round 2. v3 keeps the same household
+and the same verified figures, and adds the one thing v2 lacked: a way to
+look forward. A seventh page, **Plan December**, starts from the November
+plan with the same $6,850 of December income and shows the projected
+saving live as any figure changes, with an over-plan warning and a
+"Copy November plan" reset. Bills now tag the recurring ones (internet,
+phone, gym, streaming) with a monthly recurring total, and the fourth
+screenshot shows the new planning page instead of Reports. Nothing is a
+placeholder — every button on every page works.
 
 ## Entered on make.fun
 
